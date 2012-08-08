@@ -1,0 +1,6 @@
+recursive-include dbgp *.py
+recursive-include dbgp *.txt
+include bin/*
+include *.py
+include *.txt
+include MANIFEST.in
