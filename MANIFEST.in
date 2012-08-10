@@ -4,3 +4,4 @@ include bin/*
 include *.py
 include *.txt
 include MANIFEST.in
+exclude .gitignore
