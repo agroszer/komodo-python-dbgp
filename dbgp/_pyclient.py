@@ -61,8 +61,8 @@ class clientBase:
     def trace_skip(self, frame):
         if not frame or not frame.f_globals or \
             frame.f_lineno == 0 or \
-            frame.f_globals.has_key('DBGPHide') or \
-           (frame.f_globals.has_key('__name__') and \
+            'DBGPHide' in frame.f_globals or \
+           ('__name__' in frame.f_globals and \
             ignoreModules and \
             frame.f_globals['__name__'] in ignoreModules):
             return 1
@@ -74,7 +74,7 @@ class clientBase:
         # this method seems to make little or no difference in performance
         f = frame
         while f and f.f_back:
-            if f.f_builtins.has_key('DBGPHideChildren'):
+            if 'DBGPHideChildren' in f.f_builtins:
                 return f.f_builtins['DBGPHideChildren']
             f = f.f_back
         return 0
@@ -82,7 +82,7 @@ class clientBase:
     def trace_dispatch(self, frame, event, arg):
         # if our parent tells us to hide, carry that into our globals as well.
         # this helps perf in trace_skip somewhat
-        if frame and frame.f_back and frame.f_back.f_builtins.has_key('DBGPHideChildren'):
+        if frame and frame.f_back and 'DBGPHideChildren' in frame.f_back.f_builtins:
             frame.f_builtins['DBGPHideChildren'] = frame.f_back.f_builtins['DBGPHideChildren']
         
         if self.trace_skip(frame):
@@ -115,7 +115,7 @@ class clientBase:
             if event == 'exception':
                 return self.dispatch_exception(frame, arg)
             return self.trace_dispatch
-        except DBGPQuit, e:
+        except DBGPQuit as e:
             # debugging has stopped with the stop command.  This does
             # not end the application, it detaches from debugging.
             # kill will end the application

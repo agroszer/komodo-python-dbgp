@@ -37,8 +37,9 @@ protocol.
 
 import os
 import sys
-import socket, string, base64, urllib
+import socket, string, base64, urllib.request, urllib.parse, urllib.error
 import threading
+import types
 from xml.dom import minidom
 import copy
 
@@ -87,6 +88,15 @@ def getErrorInfo(ex):
                 errno = int(ex.args[1]) # sometimes this is a string
             except ValueError:
                 errno = 0
+        elif len(ex.args) == 1 and not hasattr(ex.args[0], "__len__"):
+            # bug94837: if we're hovering over an unevaluate-able string,
+            # we only get the numeric code in ex.args, so pull the message
+            # out of ex.msg
+            try:
+                errmsg = ex.msg
+                errno = ex.args[0]
+            except:
+                pass
         else:
             errmsg = ex.args[0]
             errno = 0
@@ -175,13 +185,13 @@ class breakpoint:
         for attrName in self._attrs:
             try:
                 oldValue = getattr(self, attrName)
-            except Exception, ex:
+            except Exception as ex:
                 log.error("failed to get old value of '%s' attribute: %s",
                           attrName, ex)
                 raise
             try:
                 newValue = getattr(bp, attrName)
-            except Exception, ex:
+            except Exception as ex:
                 log.error("failed to get new value of '%s' attribute: %s",
                           attrName, ex)
                 raise
@@ -189,7 +199,7 @@ class breakpoint:
                 attrNames.append(attrName)
                 try:
                     setattr(self, attrName, newValue)
-                except Exception, ex:
+                except Exception as ex:
                     log.error("update of '%s' attribute to '%s' failed: %s",
                               attrName, newValue, ex)
                     raise
@@ -507,7 +517,21 @@ class property:
         except:
             pass
         return value
-        
+
+    def _decode_unicode_or_byte_string(self, s, name):
+        # The only reason for this function is that PHP/Xdebug
+        # leaves the name and fullname attributes as raw, utf-8 strings.
+        # It should store them in name and fullname tags, with a
+        # base64-encoding
+        try:
+            if type(s) == str:
+                return s.encode('latin1').decode('utf-8')
+            elif type(s) == bytes:
+                return s.decode('utf-8')
+        except UnicodeDecodeError:
+            proplog.warn("Unable to decode attr %s, value %r", name, s)
+            return s        
+         
     def initWithNode(self, session, node, context = 0, depth = 0):
         self.session = session
         # name="%s" fullname="%s" type="%s" children="%d" size="%d"
@@ -518,9 +542,11 @@ class property:
         self.contextId = context
         self.depth = depth
         if node.hasAttribute('name'):
-            self.name = node.getAttribute('name')
+            self.name = self._decode_unicode_or_byte_string(node.getAttribute('name'),
+                                                            'name')
         if node.hasAttribute('fullname'):
-            self.fullname = node.getAttribute('fullname')
+            self.fullname = self._decode_unicode_or_byte_string(node.getAttribute('fullname'),
+                                                                'fullname')
         if node.hasAttribute('classname'):
             self.classname = node.getAttribute('classname')
         if node.hasAttribute('encoding'):
@@ -616,7 +642,7 @@ class property:
         if len(self.childProperties) >= self.numchildren:
             return None
         import math
-        page = long(math.floor(len(self.childProperties) / self.session.maxChildren))
+        page = int(math.floor(len(self.childProperties) / self.session.maxChildren))
         return self.getChildren(page)
     
     def getAvailableChildren(self):
@@ -851,96 +877,96 @@ class session(dbgp.serverBase.session):
         log.debug('init thread running')
         try:
             self.supportsAsync = int(self.featureGet('supports_async'))
-        except Exception, e:
+        except Exception as e:
             log.debug('init thread supportsAsync unknown')
             if self._stop: return
         try:
             self.languageName = self.featureGet('language_name')
-        except Exception, e:
+        except Exception as e:
             log.debug('init thread languageName unknown')
             if self._stop: return
         try:
             self.languageVersion = self.featureGet('language_version')
-        except Exception, e:
+        except Exception as e:
             log.debug('init thread languageVersion unknown')
             if self._stop: return
         try:
             self.maxChildren = int(self.featureGet('max_children'))
-        except Exception, e:
+        except Exception as e:
             self.maxChildren = 0
             log.debug('init thread maxChildren unknown')
             if self._stop: return
         try:
             self.maxData = int(self.featureGet('max_data'))
-        except Exception, e:
+        except Exception as e:
             self.maxData = 0
             log.debug('init thread maxData unknown')
             if self._stop: return
         try:
             self.maxDepth = int(self.featureGet('max_depth'))
-        except Exception, e:
+        except Exception as e:
             self.maxDepth = 0
             log.debug('init thread maxDepth unknown')
             if self._stop: return
         try:
             self.featureGet('show_hidden')
             self.supportsHiddenVars = 1
-        except Exception, e:
+        except Exception as e:
             self.supportsHiddenVars = 0
             log.debug('init supportsHiddenVars false')
             if self._stop: return
         try:
             self.featureGet('supports_postmortem')
             self.supportsPostmortem = 1
-        except Exception, e:
+        except Exception as e:
             self.supportsPostmortem = 0
             log.debug('init supportsPostmortem false')
             if self._stop: return
         try:
             self.featureSet('multiple_sessions', '1')
-        except Exception, e:
+        except Exception as e:
             log.debug('init thread multiple_sessions unknown')
             if self._stop: return
         try:
             # let the engine know it can send us notifications
             self.featureSet('notify_ok', '1')
-        except Exception, e:
+        except Exception as e:
             log.debug('engine does not support notifications')
             if self._stop: return
         try:
             self._supportsOptionalCommand('break')
-        except Exception, e:
+        except Exception as e:
             log.debug('init thread break unknown')
             if self._stop: return
         try:
             self._supportsOptionalCommand('eval')
-        except Exception, e:
+        except Exception as e:
             log.debug('init thread eval unknown')
             if self._stop: return
         try:
             self._supportsOptionalCommand('stdin')
-        except Exception, e:
+        except Exception as e:
             log.debug('init thread stdin unknown')
             if self._stop: return
         try:
             self._supportsOptionalCommand('detach')
-        except Exception, e:
+        except Exception as e:
             log.debug('init thread detach unknown')
             if self._stop: return
         try:
             self._supportsOptionalCommand('interact')
-        except Exception, e:
+        except Exception as e:
             log.debug('does not support interactive debugger')
             if self._stop: return
         try:
             self.breakpointLanguages = [l.lower() for l in self.featureGet('breakpoint_languages').split(',')]
-        except Exception, e:
+        except Exception as e:
             if self._stop: return
             self.breakpointLanguages = [self.languageName]
         log.debug('init thread breakpoint_languages %r', self.breakpointLanguages)
         try:
             self._getTypeMap()
-        except Exception, e:
+        except Exception as e:
             log.error('unable to retrieve typeMap from client')
             if self._stop: return
         # pass the url mapping to the engine
@@ -949,7 +975,7 @@ class session(dbgp.serverBase.session):
                 maps = self._sessionHost.getURIMappings()
                 for map in maps:
                     self.featureSet('urimap', map)
-        except Exception, e:
+        except Exception as e:
             log.debug('client does not support urimap feature')
             if self._stop: return
                 
@@ -972,7 +998,7 @@ class session(dbgp.serverBase.session):
             if err:
                 log.error("the following breakpoints/spawnpoints could not "
                           "be set on this session:\n%s" % err)
-        except Exception, e:
+        except Exception as e:
             log.error('breakpoints failed to be set properly')
             pass
         if not self._stop:
@@ -1098,7 +1124,7 @@ class session(dbgp.serverBase.session):
         self._supportsAsync()
         node = self.sendCommandWait(['feature_get', '-n', name])
         supported = node.getAttribute('supported')
-        if not supported or not long(supported):
+        if not supported or not int(supported):
             raise DBGPError('Feature %s not supported' % name)
         value = ''
         for child in node.childNodes:
@@ -1136,7 +1162,7 @@ class session(dbgp.serverBase.session):
             try:
                 self.featureGet(commandName)
                 self._supportedCommands[commandName] = 1
-            except DBGPError, e:
+            except DBGPError as e:
                 log.debug("command [%s] is not supported by debugger", commandName)
                 self._supportedCommands[commandName] = 0
         return self._supportedCommands[commandName]
@@ -1297,7 +1323,7 @@ class session(dbgp.serverBase.session):
             node = self.sendCommandWait(cmd)
             p = property()
             p.initWithNode(self, node.firstChild, contextId, stackDepth)
-        except DBGPError, e:
+        except DBGPError as e:
             # create an empty var with the exception for the value
             p = property()
             p.session = self
@@ -1604,7 +1630,7 @@ class session(dbgp.serverBase.session):
                 p.initWithNode(self, pnodes[0])
                 p.name = expression
                 return p
-        except DBGPError, e:
+        except DBGPError as e:
             # create an empty var with the exception for the value
             p = property()
             p.session = self
@@ -1632,7 +1658,7 @@ class session(dbgp.serverBase.session):
     def getTypeMap(self):
         if not self._typeMap:
             self._getTypeMap()
-        return self._typeMap.values()
+        return list(self._typeMap.values())
     
     def getDataType(self, commonType):
         for typ in self.getTypeMap():
@@ -1677,7 +1703,7 @@ class session(dbgp.serverBase.session):
             # The profile information is wrapped inside a zip archive.
             try:
                 from zipfile import ZipFile
-                from cStringIO import StringIO
+                from io import StringIO
                 zipfile = StringIO(text)
                 z = ZipFile(zipfile)
                 assert len(z.filelist) == 1
@@ -1729,7 +1755,6 @@ class application:
         self._sessions = {}
         self.currentSession = None
         self._stdin = self._stdout = self._stderr = None
-        _lock = threading.Lock() 
 
     def addSession(self, session):
         log.debug('pid %r adding thread %r', session.applicationId, session.threadId)
@@ -1739,7 +1764,7 @@ class application:
             self.currentSession = session
     
     def haveSession(self, session):
-        return session in self._sessions.values()
+        return session in list(self._sessions.values())
 
     def releaseSession(self, session):
         log.debug('removing session')
@@ -1750,24 +1775,24 @@ class application:
             self.shutdown()
             return
         if session == self.currentSession:
-            self.currentSession = self._sessions.values()[0]
+            self.currentSession = list(self._sessions.values())[0]
         
     def getSessionList(self):
-        l = self._sessions.values()
+        l = list(self._sessions.values())
         l.sort(_sessionSort)
         return l
 
     def shutdown(self):
         if self._stdin:
             self._stdin.close()
-        for ses in self._sessions.keys():
+        for ses in list(self._sessions.keys()):
             self._sessions[ses].removeApplication()
-            if self._sessions.has_key(ses):
+            if ses in self._sessions:
                 del self._sessions[ses]
         self.appMgr.releaseApplication(self)
 
     def sessionCount(self):
-        return len(self._sessions.keys())
+        return len(list(self._sessions.keys()))
 
     #sendStdin(in wstring data, in long size);
     def sendStdin(self, data, size):
@@ -1795,7 +1820,7 @@ class application:
                 
                 log.debug('writing stdin data...[%s]', data)
                 self.sendStdin(data, len(data))
-            except Exception, e:
+            except Exception as e:
                 log.exception(e)
                 break
         log.debug('quiting stdin thread')
@@ -1848,18 +1873,18 @@ class appManager:
     def releaseApplication(self, appinst):
         # kill command was issued, remove all references
         appid = appinst.currentSession.applicationId
-        if appid not in self.appList:
-            # XXX raise exception?
-            return
         self._lock.acquire()
         try:
+            if appid not in self.appList:
+                # XXX raise exception?
+                return
             data = self.appList[appid]
             del self.appList[appid]
         finally:
             self._lock.release()
 
     def shutdown(self):
-        for app in self.appList.values():
+        for app in list(self.appList.values()):
             app.shutdown()
 
 
@@ -1967,10 +1992,10 @@ class breakpointManager:
             
             # Pass this new breakpoint onto any current debug session for
             # which this is appropriate.
-            for session in self._sessions.values():
+            for session in list(self._sessions.values()):
                 try:
                     self._setSessionBreakpointOrQueueIt(session, bp)
-                except (DBGPError, COMException), ex:
+                except (DBGPError, COMException) as ex:
                     log.exception(ex)
                     pass # XXX should report to user somehow
 
@@ -1987,12 +2012,12 @@ class breakpointManager:
     def removeBreakpoint(self, guid):
         self._lock.acquire()
         try:
-            if self._breakpoints.has_key(guid):
+            if guid in self._breakpoints:
                 bp = self._breakpoints[guid]
                 del self._breakpoints[guid]
 
                 # Remove this breakpoint from any session that currently has it.
-                for sessId, sessionBPIDs in self._allSessionBPIDs.items():
+                for sessId, sessionBPIDs in list(self._allSessionBPIDs.items()):
                     if guid in sessionBPIDs:
                         session = self._sessions[sessId]
                         self._removeSessionBreakpointOrQueueIt(session, bp)
@@ -2012,10 +2037,18 @@ class breakpointManager:
         try:
             # Remove all breakpoints from all current debug sessions.
             #XXX:PERF _Could_ optimize this if necessary.
-            for sessId, sessionBPIDs in self._allSessionBPIDs.items():
-                for guid in sessionBPIDs.keys():
-                    session = self._sessions[sessId]
-                    bp = self._breakpoints[guid]
+            for sessId, sessionBPIDs in list(self._allSessionBPIDs.items()):
+                for guid in list(sessionBPIDs.keys()):
+                    try:
+                        session = self._sessions[sessId]
+                    except (KeyError, ItemError) as ex:
+                        log.exception("Failed to find session %r", sessId)
+                        continue
+                    try:
+                        bp = self._breakpoints[guid]
+                    except (KeyError, ItemError) as ex:
+                        log.exception("Failed to find breakpoint %r in session %r", guid, sessId)
+                        continue
                     self._removeSessionBreakpointOrQueueIt(session, bp)
 
             self._breakpoints = {}
@@ -2042,7 +2075,7 @@ class breakpointManager:
             # Note: We are presuming here that the breakpoint update did not
             #       all of the sudden make this breakpoint applicable to a
             #       debug session when it previously was not.
-            for sessId, sessionBPIDs in self._allSessionBPIDs.items():
+            for sessId, sessionBPIDs in list(self._allSessionBPIDs.items()):
                 if guid in sessionBPIDs:
                     session = self._sessions[sessId]
                     self._updateSessionBreakpointOrQueueIt(session, bp, attrs)
@@ -2073,7 +2106,7 @@ class breakpointManager:
         try:
             #XXX Currently don't have to allow the "not bp.language": all
             #    breakpoints have their language attribute set.
-            return [bp for bp in self._breakpoints.values()
+            return [bp for bp in list(self._breakpoints.values())
                     if not bp.language or bp.language.lower() == lang.lower()]
         finally:
             self._lock.release()
@@ -2096,7 +2129,7 @@ class breakpointManager:
         #    "Session" per thread, yet all threads share the same breakpoints.
         #    At least, that is my understanding of the intention from Shane.
         bplog.debug("breakpointManager.setSessionBreakpoints(session)")
-        breakpoints = [bp for bp in self._breakpoints.values()]
+        breakpoints = [bp for bp in list(self._breakpoints.values())]
         sessId = (session.applicationId, session.threadId)
         self._sessions[sessId] = session
         self._allSessionBPIDs[sessId] = {}
@@ -2105,7 +2138,7 @@ class breakpointManager:
         for bp in breakpoints:
             try:
                 self.__setSessionBreakpoint(session, bp)
-            except (DBGPError, COMException), ex:
+            except (DBGPError, COMException) as ex:
                 errno, errmsg = getErrorInfo(ex)
                 failed.append("%s (%s)" % (bp.getName(), errmsg))
         return '\n'.join(failed)
@@ -2113,11 +2146,11 @@ class breakpointManager:
     def releaseSession(self, session):
         """Release references to this session, it is shutting down."""
         sessId = (session.applicationId, session.threadId)
-        if self._allSessionBPIDs.has_key(sessId):
+        if sessId in self._allSessionBPIDs:
             del self._allSessionBPIDs[sessId]
-        if self._queuedSessionCommands.has_key(sessId):
+        if sessId in self._queuedSessionCommands:
             del self._queuedSessionCommands[sessId]
-        if self._sessions.has_key(sessId):
+        if sessId in self._sessions:
             del self._sessions[sessId]
 
     def sendUpdatesToSession(self, session):
@@ -2286,7 +2319,7 @@ class manager:
         try:
             proxy_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             proxy_socket.connect((self._proxyAddr,self._proxyPort))
-            command = u'proxyinit -p %d -k %s -m 1' % \
+            command = 'proxyinit -p %d -k %s -m 1' % \
                         (self._listener._port,
                          self._server_key)
             proxy_socket.send(command.encode('utf-8'))
@@ -2297,7 +2330,7 @@ class manager:
             if root.getAttribute('success') == '1':
                 self.proxyClientAddress = root.getAttribute('address')
                 self.proxyClientPort = int(root.getAttribute('port'))
-        except Exception, e:
+        except Exception as e:
             self.stop()
             raise DBGPError("the debugger proxy could not be contacted.")
 
@@ -2306,13 +2339,13 @@ class manager:
         try:
             proxy_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             proxy_socket.connect((self._proxyAddr,self._proxyPort))
-            command = u'proxystop -k %s' % self._server_key
+            command = 'proxystop -k %s' % self._server_key
             proxy_socket.send(command.encode('utf-8'))
             resp = proxy_socket.recv(1024)
             proxy_socket.close()
             self.proxyClientAddress = ''
             self.proxyClientPort = 0
-        except Exception, e:
+        except Exception as e:
             # if we cannot stop the proxy when we're stopping, lets let it go
             log.debug('unable to contact proxy to stop proxying')
     
@@ -2339,7 +2372,7 @@ class manager:
         self.appManager.shutdown()
 
     def getApplicationList(self):
-        return self.appManager.appList.values()
+        return list(self.appManager.appList.values())
         
     ##################################################################
     # session callback functions

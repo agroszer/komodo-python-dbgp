@@ -29,7 +29,7 @@
 
 """
     pydbgp [dbgp_args_below] script.py [script_args]
-
+    
     -d hostname:port  to debug a script
     -e script.py      preload and execute script before debugging
     -k ide_key        a IDE key used with proxies
@@ -54,7 +54,7 @@
     -f logFile        Full path to write log messages to
 
 """
-
+    
 __version__ = (1, 1, 0)
 __revision__ = "$Revision: #1 $ $Change: 118727 $"
 
@@ -116,7 +116,7 @@ class IOStream:
         self.__dict__['_origStream'] = origStream
         self.__dict__['_encoding'] = encoding
         self._encodeOnOutput = (sys.version_info[0] == 2)
-
+    
     def write(self, s):
         global DBGPHideChildren
         origDBGPHideChildren = DBGPHideChildren
@@ -134,7 +134,7 @@ class IOStream:
     def writelines(self, lines):
         text = ''.join(lines)
         self.write(text)
-
+        
     def __getattr__(self, attr):
         if self.__dict__.has_key(attr):
             return getattr(self,attr)
@@ -251,7 +251,7 @@ def main(argv):
         sys.stderr.write("pydbgp: error: IDE Port not provided\n")
         sys.stderr.write("See 'pydbgp --help'.\n")
         return 1
-
+    
     if interactive:
         if not args:
             args = ['interactive']
@@ -262,7 +262,7 @@ def main(argv):
         sys.stderr.write("pydbgp: error: scriptname not provided\n")
         sys.stderr.write("See 'pydbgp --help'.\n")
         return 1
-
+    
     # handle ~ paths
     if not interactive:
         args[0] = os.path.expanduser(args[0])
@@ -271,7 +271,7 @@ def main(argv):
             sys.stderr.write("pydbgp: error: scriptname %s does not exist\n" % (args[0],))
             sys.stderr.write("See 'pydbgp --help'.\n")
             return 1
-
+        
     if nodebug:
         dbgp.client.runWithoutDebug(args, interactive, host, port, idekey, logLevel)
     elif profiling:
@@ -300,4 +300,5 @@ def main(argv):
 
 if __name__ == "__main__":
     sys.exit( main(sys.argv) )
+
 

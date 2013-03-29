@@ -68,7 +68,7 @@ class session:
                     if input:
                         #log.debug('handling data available on socket')
                         self._handleIncoming()
-                except Exception, e:
+                except Exception as e:
                     error_count += 1
                     if error_count >= 5:
                         log.exception("had 5 session cmdloop exceptions - aborting the session")
@@ -134,7 +134,7 @@ class session:
             # get our init information
             self._sessionHost.initHandler(self, root)
         else:
-            print root.ownerDocument.toprettyxml()
+            print(root.ownerDocument.toprettyxml())
 
     def _handleIncoming(self):
         data = ''
@@ -149,7 +149,7 @@ class session:
                 eop = data.find('\0')
                 if eop < 0:
                     break
-                size = long(data[:eop])
+                size = int(data[:eop])
                 data = data[eop+1:] # skip \0
                 sizeLeft = size - len(data) + 1
                 while sizeLeft > 0:
@@ -196,7 +196,7 @@ class session:
             log.debug("sendCommand: %s", cmdline)
             self._socket.sendall(cmdline+'\0')
             #log.debug("sendCommand: %s DONE", cmdline)
-        except socket.error, e:
+        except socket.error as e:
             log.error("session sendCommand socket error %r", e)
             self._stop = 1
         return self._transaction_id
@@ -248,7 +248,7 @@ class listener:
                 s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 s.connect((addr, port))
                 s.close()
-            except socket.error, details:
+            except socket.error as details:
                 log.error("The host listener could not cancel the "+\
                       "listener %d:%r", port, details)
         else:
@@ -281,7 +281,7 @@ class listener:
             if not self._port:
                 addr = self._server.getsockname()
                 self._port = addr[1]
-        except socket.error, details:
+        except socket.error as details:
             errmsg = "the debugger could not bind on port %d." % self._port
             self._port = 0
             self._server = None
@@ -290,7 +290,7 @@ class listener:
     def _listen(self):
         try:
             self._server.listen(5)
-        except socket.error, details:
+        except socket.error as details:
             log.exception("Unable to listen on socket connection")
             raise DBGPError("the debugger could not start listening on port %d." % self._port)
         try:
@@ -301,12 +301,12 @@ class listener:
                 log.info("server connection: %r", addr)
                 self.startNewSession(client, addr)
                 self._totalConnections = self._totalConnections + 1
-        except socket.error, details:
+        except socket.error as details:
             raise DBGPError("the debugger could not accept new connection.")
         log.debug('listener._listen thread shutting down')
         try:
             self._server.close()
-        except socket.error, details:
+        except socket.error as details:
             raise DBGPError("the debugger could could not be closed.")
         self._server = None
         self._stop = 0

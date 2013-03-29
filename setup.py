@@ -32,7 +32,7 @@ class Dbgp_build_ext(build_ext):
 
 setup(
     name=NAME,
-    version='7.1.0',
+    version='8.0.1',
     description='The ActiveState Komodo DBGP server',
 
     author="Shane Caraveo, Trent Mick",
@@ -43,6 +43,7 @@ setup(
     url='http://github.com/agroszer/komodo-python-dbgp',
     packages=['dbgp'],
     scripts=['bin/pydbgp',
+             'bin/py3_dbgp',
              'bin/pydbgpproxy'],
     zip_safe=False,
 

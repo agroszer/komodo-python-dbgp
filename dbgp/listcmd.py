@@ -257,7 +257,7 @@ class ListCmd(cmd.Cmd):
             else:
                 if self.use_rawinput:
                     try:
-                        line = raw_input(self.prompt)
+                        line = input(self.prompt)
                     except EOFError:
                         line = 'EOF'
                 else:
@@ -310,11 +310,11 @@ class ListCmd(cmd.Cmd):
             return self.default(argv)
         try:
             return func(argv)
-        except TypeError, ex:
+        except TypeError as ex:
             self.logerror("%s: %s" % (cmdName, ex))
             self.logerror("try 'help %s'" % cmdName)
             if 0:   # for debugging
-                print
+                print()
                 import traceback
                 traceback.print_exception(*sys.exc_info())
 

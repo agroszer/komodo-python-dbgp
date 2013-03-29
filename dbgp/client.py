@@ -38,12 +38,12 @@ if sys.hexversion < 0x020000F0:
     sys.exit(1)
 
 import socket, copy
-import thread, threading
+import _thread, threading
 import tokenize
 # command line host driver
-import getopt, os, types, StringIO, Queue
+import getopt, os, types, io, queue
 import traceback, re
-import base64, urlparse
+import base64, urllib.parse
 import dbgp.listcmd as listcmd
 
 from dbgp.common import *
@@ -75,7 +75,7 @@ else:
         sys.modules["_client"] = _client
         from _client import *
         del sys.modules["_client"], info, _client
-    except ImportError, ex:
+    except ImportError as ex:
         #configureLogging(log, logging.INFO)
         #log.exception(ex)
         # Fallback to pure Python support module.
@@ -86,25 +86,25 @@ else:
 # prevent internal DBGP threads from getting debugged.  Any thread started
 # from DBGP for debugger purposes should use _nonDebugThread
 # to start threads with.
-_nonDebugThread = thread.start_new_thread
+_nonDebugThread = _thread.start_new_thread
 
 # base types do not have children
-BaseTypes = [types.StringType,
-             types.UnicodeType,
-             types.IntType,
-             types.LongType,
-             types.FloatType]
+BaseTypes = [bytes,
+             str,
+             int,
+             int,
+             float]
 
 if sys.hexversion >= 0x020300F0:
     BaseTypes.append(type(True))
 
-StringTypes = [types.StringType,
-             types.UnicodeType]
+StringTypes = [bytes,
+             str]
 
 HiddenTypes = [types.BuiltinMethodType,
                types.BuiltinFunctionType,
                types.FunctionType,
-               types.TypeType, # py2to3 => type 
+               type, # py2to3 => type 
                types.ModuleType]
 if sys.version_info[0] >= 3:
     _is_py3 = True
@@ -117,7 +117,7 @@ else:
     _is_py3 = False
     #Assume version 2 -- Python 1.* not supported.
     HiddenTypes += [types.UnboundMethodType,
-                    types.ClassType]
+                    type]
     _supports_keyed_sort = sys.version_info[1] >= 4
     def _encode_response(response):
         # response is already utf-8-encoded
@@ -144,7 +144,7 @@ if os.name == 'java': # for jython
     # Currently we have problems with v<2.1
     
     if not hasattr(sys, 'version_info') or int(''.join(map(str, sys.version_info[0:3]))) < 210:
-        print 'Jython debugging is not support for Jython versions below 2.1'
+        print('Jython debugging is not support for Jython versions below 2.1')
         sys.exit(1)
         
     # Check if we are running on windows
@@ -160,11 +160,11 @@ if _is_py3:
     from urllib.request import pathname2url as urllib_pathname2url
     from urllib.request import url2pathname as urllib_url2pathname
 else:
-    from urllib import pathname2url as urllib_pathname2url
-    from urllib import url2pathname as urllib_url2pathname
+    from urllib.request import pathname2url as urllib_pathname2url
+    from urllib.request import url2pathname as urllib_url2pathname
 
 def url2pathname( url ):
-    decomposedURL = urlparse.urlparse( url, 'file:///' )
+    decomposedURL = urllib.parse.urlparse( url, 'file:///' )
 
     path = decomposedURL[2]
     # The path will begin with a superfluous '/' in this case
@@ -219,10 +219,12 @@ def escape(data, entities={}):
     the optional entities parameter.  The keys and values must all be
     strings; each key will be replaced with its corresponding value.
     """
+    if _is_py3 and type(data) == bytes:
+        data = data.decode('utf-8')
     data = data.replace("&", "&amp;")
     data = data.replace("<", "&lt;")
     data = data.replace(">", "&gt;")
-    for chars, entity in entities.items():
+    for chars, entity in list(entities.items()):
         data = data.replace(chars, entity)
     return data
 
@@ -260,7 +262,7 @@ def _getAttrStr(attrs):
     so it is safe to use the string right after a tag name.
     """
     s = ''
-    for attr, value in attrs.items():
+    for attr, value in list(attrs.items()):
         s += ' %s=%s' % (attr, quoteattr(value))
     return s
 
@@ -284,9 +286,9 @@ def _get_stack_data(item):
     frame, lineno = item
     where = None
     if frame.f_code.co_name == '?':
-        if frame.f_locals.has_key('__name__'):
+        if '__name__' in frame.f_locals:
             where = frame.f_locals['__name__']
-        elif frame.f_globals.has_key('__name__'):
+        elif '__name__' in frame.f_globals:
             where = frame.f_globals['__name__']
     if not where:
         where = frame.f_code.co_name or '?'
@@ -303,7 +305,7 @@ def _get_stack_data(item):
         # a correct source file. We will try to find the source
         # file in the same directory as the
         # .py[c,o] file.
-        if not frame.f_globals.has_key('__file__'):
+        if '__file__' not in frame.f_globals:
             # This actually seems possible based on import.c
             filename = codeFileName 
         else:
@@ -328,10 +330,10 @@ def _stack_repr(stack):
     for item in stack:
         level = level + 1
         (filename, lineno, where) = _get_stack_data(item)
-        print "%d %s:%d:%s" % (level,filename, lineno, where)
+        print("%d %s:%d:%s" % (level,filename, lineno, where))
 
 def _hide_stack(f):
-    return DBGPDebugDebugger == DBGP_STOPPABLE_NEVER and f.f_globals.has_key('DBGPHide')
+    return DBGPDebugDebugger == DBGP_STOPPABLE_NEVER and 'DBGPHide' in f.f_globals
 
 def _print_tb(tb, limit=None, file=None):
     """Print up to 'limit' stack trace entries from the traceback 'tb'.
@@ -444,7 +446,7 @@ def _format_exception_only():
 
 def _frame_name_dump(frame):
     fname = _filename_from_frame(frame) or "??"
-    if frame.f_globals.has_key('__name__'):
+    if '__name__' in frame.f_globals:
         return "%s at %s:%d" % (frame.f_globals['__name__'], 
                                 fname,
                                 frame.f_lineno)
@@ -454,7 +456,7 @@ def _frame_name_dump(frame):
 
 def _safe_apply(what_failed, func, *args):
     try:
-        return apply(func, args)
+        return func(*args)
     except:
         return "%s failed - %s: %s" % (what_failed, sys.exc_info()[0], sys.exc_info()[1])
 
@@ -533,7 +535,7 @@ class h_base(Hooks):
     
     def setModule(self, module):
         d = self.modules_dict()
-        if d.has_key(module.name):
+        if module.name in d:
             self.old_main = d[module.name]
         d[module.name] = module.module
 
@@ -579,7 +581,7 @@ class h_exec(h_base):
         try:
             if tracer:
                 tracer.starttrace()
-            exec code in globals, locals
+            exec(code, globals, locals)
         finally:
             if tracer:
                 tracer.stoptrace()
@@ -651,7 +653,7 @@ class h_execfile(h_base):
             self.setSysInfo(sys, file, args)
             
         try:
-            exec "import site\n\n" in globals, locals
+            exec("import site\n\n", globals, locals)
             del globals['site']
             if _is_py3:
                 globals['__file__'] = file
@@ -677,7 +679,7 @@ class h_execfile(h_base):
                 if profiler:
                     profiler.runcall(execfile, file, globals, locals)
                 else:
-                    execfile(file, globals, locals)
+                    exec(compile(open(file).read(), file, 'exec'), globals, locals)
         finally:
             if tracer:
                 tracer.stoptrace()
@@ -745,7 +747,7 @@ class StreamOut:
         self.write(text)
         
     def __getattr__(self, attr):
-        if self.__dict__.has_key(attr):
+        if attr in self.__dict__:
             return getattr(self,attr)
         return getattr(self._origStream, attr)
 
@@ -771,7 +773,7 @@ class StreamStdin:
         return self._origStream.readlines(size)
         
     def __getattr__(self, attr):
-        if self.__dict__.has_key(attr):
+        if attr in self.__dict__:
             return getattr(self,attr)
         return getattr(self._origStream, attr)
     
@@ -892,39 +894,39 @@ if _is_py3:
                 self._read_cv.release()
 
 else:
-    class StreamIn(StringIO.StringIO):
+    class StreamIn(io.StringIO):
         def __init__(self, origStream, client):
-            StringIO.StringIO.__init__(self, '')
+            io.StringIO.__init__(self, '')
             self._origStream = origStream
             self._read_cv = threading.Condition()
             self._client = client
     
         def __getattr__(self, attr):
-            if self.__dict__.has_key(attr):
+            if attr in self.__dict__:
                 return getattr(self.__dict__, attr)
             return getattr(self._origStream, attr)
         
         def stop(self):
             if not self.closed:
-                StringIO.StringIO.close(self)
+                io.StringIO.close(self)
             return self._origStream
     
         def write(self, s):
             # 2011-11-23: When would this be called?  writing to an input stream?
             if self.closed:
-                raise ValueError, "I/O operation on closed file"
+                raise ValueError("I/O operation on closed file")
             self._read_cv.acquire()
             try:
                 # always write to the end
-                StringIO.StringIO.seek(self, 0, os.SEEK_END)
-                StringIO.StringIO.write(self, s)
+                io.StringIO.seek(self, 0, os.SEEK_END)
+                io.StringIO.write(self, s)
                 self._read_cv.notify()
             finally:
                 self._read_cv.release()
     
         def read(self, size = -1):
             if self.closed:
-                raise ValueError, "I/O operation on closed file"
+                raise ValueError("I/O operation on closed file")
             self._read_cv.acquire()
             try:
                 if not self.buf:
@@ -934,8 +936,8 @@ else:
                 # always read from the start
                 if self.closed:
                     return None
-                StringIO.StringIO.seek(self, 0)
-                x = StringIO.StringIO.read(self, size)
+                io.StringIO.seek(self, 0)
+                x = io.StringIO.read(self, size)
                 # remove what we read from the stream
                 # this ensures that reading from the beginning
                 # will always give us new data, we're not in the
@@ -947,7 +949,7 @@ else:
         
         def readline(self, size = None):
             if self.closed:
-                raise ValueError, "I/O operation on closed file"
+                raise ValueError("I/O operation on closed file")
             self._read_cv.acquire()
             try:
                 if not self.buf:
@@ -957,8 +959,8 @@ else:
                 # always read from the start
                 if self.closed:
                     return None
-                StringIO.StringIO.seek(self, 0)
-                x = StringIO.StringIO.readline(self, size)
+                io.StringIO.seek(self, 0)
+                x = io.StringIO.readline(self, size)
                 # remove what we read from the stream
                 # this ensures that reading from the beginning
                 # will always give us new data, we're not in the
@@ -978,7 +980,7 @@ if sys.hexversion < 0x020300F0:
     # 2.3 sources is a DOG under 2.2.  This code essentially
     # does the same thing but works great under 2.2.
     
-    class TimedQueue(Queue.Queue):
+    class TimedQueue(queue.Queue):
         """TimedQueue enhanced Queue with wait timeouts
     
         The regular Queue only provides blocking or non-blocking
@@ -986,7 +988,7 @@ if sys.hexversion < 0x020300F0:
         """
     
         def __init__(self, maxsize=0):
-            Queue.Queue.__init__(self, maxsize)
+            queue.Queue.__init__(self, maxsize)
             self._waitCondition = threading.Condition()
         
         def put(self, item, block=1):
@@ -996,7 +998,7 @@ if sys.hexversion < 0x020300F0:
             # in the put, only in get.
             self._waitCondition.acquire()
             try:
-                Queue.Queue.put(self, item, block)
+                queue.Queue.put(self, item, block)
                 self._waitCondition.notify()
             finally:
                 self._waitCondition.release()
@@ -1012,17 +1014,17 @@ if sys.hexversion < 0x020300F0:
                 self._waitCondition.acquire()
                 try:
                     # try non blocking first, then wait
-                    return Queue.Queue.get(self, 0)
-                except Queue.Empty, e:
+                    return queue.Queue.get(self, 0)
+                except queue.Empty as e:
                     if timeout is None and not block:
                         raise
                 # ok, so we wait now
                 self._waitCondition.wait(timeout)
-                return Queue.Queue.get(self, 0)
+                return queue.Queue.get(self, 0)
             finally:
                 self._waitCondition.release()
 else:
-    TimedQueue = Queue.Queue
+    TimedQueue = queue.Queue
 
 class CommandError(Exception):
     """A simple exception that knows how to serialize itself to xml
@@ -1116,11 +1118,11 @@ class Breakpoint:
             self.number = len(breakpointsByNumber) - 1
         else:
             breakpointsByNumber[self.number] = self
-        if breakpointList.has_key((self.file, self.line)):
+        if (self.file, self.line) in breakpointList:
             breakpointList[self.file, self.line].append(self)
         else:
             breakpointList[self.file, self.line] = [self]
-        if breakpointsByFile.has_key(self.file):
+        if self.file in breakpointsByFile:
             breakpointsByFile[self.file].append(self)
         else:
             breakpointsByFile[self.file] = [self]
@@ -1214,17 +1216,17 @@ def effective(frame, arg, type):
 
     """
     file = canonic(_filename_from_frame(frame))
-    if not breakpointsByFile.has_key(file):
+    if file not in breakpointsByFile:
         return (None, None)
 
     line = frame.f_lineno
     
     possibles = []
-    if breakpointList.has_key((file, line)):
+    if (file, line) in breakpointList:
         possibles += breakpointList[file, line]
-    if breakpointList.has_key((file, 0)):
+    if (file, 0) in breakpointList:
         possibles += breakpointList[file, 0]
-    if breakpointList.has_key(('', 0)):
+    if ('', 0) in breakpointList:
         possibles += breakpointList['', 0]
         
     # reduce list by type if we have a type
@@ -1298,7 +1300,7 @@ def effective(frame, arg, type):
                         exNames = _class_names(arg[0])
                         if not exNames:
                             return (None, None)
-                    if b.cond not in exNames.values():
+                    if b.cond not in list(exNames.values()):
                         continue
                 else:
                     continue
@@ -1348,7 +1350,23 @@ else:
     def base64_decodestring(data):
         return base64.decodestring(data)
 
-class Property:
+def Property(name, fullname, value, encoding='base64',
+             include_private=0, include_hiddenTypes=None):
+    # Bug 94782 -- better support for numpy
+    typeName = str(type(value))
+    if typeName.startswith("<type 'numpy") and not include_hiddenTypes:
+        if typeName.startswith("<type 'numpy.ndarray"):
+            return NumpyNdarrayProperty(name, fullname, value, encoding,
+                                        include_private, include_hiddenTypes)
+        else:
+            return NumpyOtherProperty(name, fullname, value, encoding,
+                                        include_private, include_hiddenTypes)
+    
+    else:
+        return StandardProperty(name, fullname, value, encoding,
+                                include_private, include_hiddenTypes)
+
+class StandardProperty:
     """DBGP Python Property class.
 
     a class to serialize python data types into xml
@@ -1357,7 +1375,7 @@ class Property:
 
     def __init__(self, name, fullname, value, encoding = 'base64',
                  include_private=0, include_hiddenTypes=None):
-        # protoct against new types
+        # protect against new types
         self.name = name
         self.fullname = fullname
         self.value = value
@@ -1378,6 +1396,16 @@ class Property:
     def _xmlcharref(self, m):
         return "&#x%0x;" % ord(m.group(1))
 
+    _should_be_base64_encoded__ctrl_char_re = re.compile(r'[\x00-\x08\x0b\x0c\x0d\-x0e\x10-\x1f]')
+    _should_be_base64_encoded__high_bit_re = re.compile(r'[^\x00-\xff]')
+    def _should_be_base64_encoded(self, data):
+        if _is_py3 and type(data) == bytes: # types.StringType 2=>3 bytes
+            data = data.decode('utf-8')
+        return ('<![CDATA[' in data
+                or ']]>' in data
+                or self._should_be_base64_encoded__ctrl_char_re.search(data)
+                or self._should_be_base64_encoded__high_bit_re.search(data))
+
     charRefPtn = re.compile(r'([^\x00-\x7f])')
     def _get_encodedData(self, data):
         # First, convert byte-strings into unicode
@@ -1391,8 +1419,14 @@ class Property:
                     data = data.decode('latin1')
                 except UnicodeDecodeError:
                     pass
+        if self.encoding != 'base64':
+            encodeAsBase64 = False
+        elif (not _is_py3) or type(data) == str: # types.UnicodeType 2=>3 str
+            encodeAsBase64 = self._should_be_base64_encoded(data)
+        else:
+            encodeAsBase64 = True
         if ((_is_py3 and type(data) == str)
-            or ((not _is_py3) and type(data) in types.StringTypes)):
+            or ((not _is_py3) and type(data) in (bytes, str))):
             try:
                 data = data.encode('utf-8')
             except:
@@ -1401,7 +1435,7 @@ class Property:
                     data = self.charRefPtn.sub(self._xmlcharref, data)
                 except:
                     data = "?" * len(data)
-        if self.encoding == 'base64':
+        if encodeAsBase64:
             return base64_encodestring(data), self.encoding
         return escape(data), None
         
@@ -1410,6 +1444,12 @@ class Property:
 
     def get_encodedFullname(self):
         return self._get_encodedData(self.fullname)
+
+    def _construct_name_tag(self, tagName, valuePayload, encoding):
+        if encoding:
+            return '<%s encoding="%s"><![CDATA[%s]]></%s>' % (tagName, encoding, valuePayload, tagName)
+        else:
+            return '<%s><![CDATA[%s]]></%s>' % (tagName, valuePayload, tagName)
 
     def get_encodedValue(self, maxdata = 0):
         # maxdata constraint, so we cannot use _get_encodedData
@@ -1536,12 +1576,14 @@ class Property:
                      # debugger failed!
                      # XXX Shouldn't return all of really big mappings but how
                      # do we know what part the user is interested in?
-                    child_keys = self.value.keys()
+                    child_keys = list(self.value.keys())
                     self._numchildren += len(child_keys)
                     if not countOnly:
                         for child in child_keys:
                             cvalue = _safe_index("child", self.value, child)
-                            if type(child) not in types.StringTypes:
+                            # Python bug 5425: types.StringTypes considered bogus,
+                            # as most other types fields give a single value
+                            if type(child) not in (str, bytes):
                                 cname = _safe_apply("repr", repr, child)
                             else:
                                 cname = "'%s'" % child.replace("'","\'")
@@ -1607,14 +1649,29 @@ class Property:
             haschildren = 0
             
         value = ''
+        encodeAsCData = False
         if vType not in StringTypes:
             if numchildren == 0 or vType in HiddenTypes:
                 # Removed when writing the py3 port:
                 # or vType == types.InstanceType
                 # This means instance repr's appear only when the code
                 # object has no children.
-                value = '<value><![CDATA[%s]]></value>'  % (self.get_valueString()[:maxdata])
+                data = self.value = self.get_valueString()[:maxdata]
+                if self._should_be_base64_encoded(data):
+                    encodeAsCData = True
+                else:
+                    value = '<value><![CDATA[%s]]></value>' % (data,)
+            else:
+                try:
+                    stringified_value = str(self.value)
+                    if ' object at 0x' not in stringified_value:
+                        self.value = stringified_value
+                        encodeAsCData = True
+                except:
+                    log.info("Failed to str %r", self.value)
         else:
+            encodeAsCData = True
+        if encodeAsCData:
             data, encoding = self.get_encodedValue(maxdata)
             value = '<value encoding="%s"><![CDATA[%s]]></value>'  % (encoding, data)
 
@@ -1630,9 +1687,9 @@ class Property:
         # Most likely it's an optimization 
 
         name, encoding = self.get_encodedName()
-        childprops.append('<name encoding="%s"><![CDATA[%s]]></name>' % (encoding, name))
+        childprops.append(self._construct_name_tag("name", name, encoding))
         fullname, encoding = self.get_encodedFullname()
-        childprops.append('<fullname encoding="%s"><![CDATA[%s]]></fullname>' % (encoding, fullname))
+        childprops.append(self._construct_name_tag("fullname", fullname, encoding))
 
         value = value + ''.join(childprops)
         attrs = {'type': self.get_typeString(),
@@ -1645,7 +1702,114 @@ class Property:
 
         return '<property %s>%s</property>' % (_getAttrStr(attrs), value)
 
+ 
+class NumpyNdarrayProperty(StandardProperty):
+    """
+    Numpy objects are complex wrappers around standard Python objects.
+    Unless the user asks to see all attributes, the Python debugger uses
+    this wrapper class around arrays, and the NumpyOtherProperty class
+    for all other object types, to present a more useful view of the
+    objects.
+    Note that property_set works as usual.
+    """
+    def get_encodedValue(self, maxdata = 0):
+        # maxdata constraint, so we cannot use _get_encodedData
+        data = self.get_valueString()
+        if maxdata:
+            data = self.value[:maxdata]
+        return self._get_encodedData(data)
 
+    def get_valueString(self):
+        try:
+            return "%s: %s" % (type(self.value).__name__, self.value)
+        except:
+            # XXX raise a CommandError exception?
+            return "Looking at object failed - %s: %s" % (sys.exc_info()[0], sys.exc_info()[1])
+    
+    def get_numchildren(self):
+        return len(self.value)
+    
+    def get_children(self, countOnly=0):
+        # Return only the data items, not all the other attributes
+        # Too bad get_children returns all of them, and then toxml selects the
+        # ones it wants.  Better if get_children selected fewer items.
+        if self._children is not None:
+            return self._children
+        self._numchildren = self.get_numchildren()
+        if countOnly:
+            return None
+        self._children = [Property("%s" % i,
+                                   "%s[%s]" % (self.name, i),
+                                   self.value[i],
+                                   self.encoding,
+                                   self.include_private,
+                                   self.include_hiddenTypes) for i in range(self._numchildren)];
+        return self._children
+        
+class NumpyOtherProperty(StandardProperty):
+    
+    def __init__(self, *args, **kwargs):
+        StandardProperty.__init__(self, *args, **kwargs)
+        self._hasEncodedNumpyValue = False
+        self._encodedNumpyValue = None
+
+    def get_encodedValue(self, maxdata = 0):
+        # maxdata constraint, so we cannot use _get_encodedData
+        data = self.get_valueString()
+        if maxdata:
+            data = self.value[:maxdata]
+        return self._get_encodedData(data)
+
+    def get_valueString(self):
+        try:
+            return "%s" % (self._numpy_to_python_value())
+        except:
+            # XXX raise a CommandError exception?
+            return "Looking at object failed - %s: %s" % (sys.exc_info()[0], sys.exc_info()[1])
+    
+    def get_numchildren(self):
+        return 0
+        
+    def _numpy_to_python_value(self):
+        if not self._hasEncodedNumpyValue:
+            self._encodedNumpyValue = self._finish_numpy_to_python_value()
+            self._hasEncodedNumpyValue = True
+        return self._encodedNumpyValue
+    
+    def _finish_numpy_to_python_value(self):
+        try:
+            value = self.value
+            prefixPart = len("<type 'numpy.")
+            # Drop the trailing "'>"
+            valueType = str(type(value))[prefixPart:-2]
+            if valueType.startswith("long"):
+                valueType = valueType[4:]
+            elif valueType.startswith("uint"):
+                valueType = valueType[1:]
+            elif valueType == "ulonglong":
+                valueType = "long"
+                
+            if valueType == "ndarray":
+                return [value[i] for i in range(len(value))]
+            if valueType.startswith("int"):
+                return int(value)
+            if valueType.startswith("bool"):
+                return bool(value)
+            if valueType.startswith("double") or valueType.startswith("float"):
+                return float(value)
+            if valueType == "long":
+                return int(value)
+            if valueType == "short":
+                return int(value)
+            if valueType.startswith("string") or valueType.startswith("unicode"):
+                return str(value)
+            if valueType.startswith("void"):
+                return None
+        except:
+            log.exception("Failure to get numpy value")
+        return str(value)
+
+        
 class dbgpClient(clientBase):
 
     """DBGP Python debugger base class.
@@ -1705,7 +1869,7 @@ class dbgpClient(clientBase):
         frame = sys._getframe().f_back
         self.reset()
         while frame:
-            if not frame.f_globals.has_key('DBGPHide'):
+            if 'DBGPHide' not in frame.f_globals:
                 if hasattr(self,'trace_dispatch'):
                     frame.f_trace = self.trace_dispatch
                 else:
@@ -1747,7 +1911,7 @@ class dbgpClient(clientBase):
         if t and t.tb_frame is f:
             t = t.tb_next
         while f is not None:
-            if f.f_builtins.has_key('DBGPHideChildren') and \
+            if 'DBGPHideChildren' in f.f_builtins and \
                f.f_builtins['DBGPHideChildren']:
                 # clear the stack of the children
                 stack = []
@@ -1869,7 +2033,7 @@ class dbgpClient(clientBase):
         res = None
         try:
             try:
-                res = apply(func, args, kwargs)
+                res = func(*args, **kwargs)
             except DBGPQuit:
                 pass
         finally:
@@ -1905,7 +2069,7 @@ class dbgpClient(clientBase):
             frame = None
             try:
                 frame, lineno = self.stack[0]
-            except IndexError, e:
+            except IndexError as e:
                 pass
             if not frame:
                 # looks like we were started in interactive mode
@@ -1925,7 +2089,7 @@ def registerClient(client):
 def deregisterClient(client):
     #print "deregister ",client.thread_id
     global _clientInstances
-    if _clientInstances.has_key(client.thread_id):
+    if client.thread_id in _clientInstances:
         del _clientInstances[client.thread_id]
 
 def warnMainThreadEnding():
@@ -1954,7 +2118,7 @@ def getClientForThread():
         if '_clientInstances' in frame.f_globals:
             ci = frame.f_globals['_clientInstances']
             
-            tid = thread.get_ident()
+            tid = _thread.get_ident()
             if tid in ci:
                 return ci[tid]
         frame = frame.f_back
@@ -1984,7 +2148,7 @@ class dbgpSocket:
         try:
             self._socket = socket.socket(self.socket_type, socket.SOCK_STREAM)
             self._socket.connect((self.hostname,self.port))
-        except socket.error, e:
+        except socket.error as e:
             sys.stderr.write("dbgpSocket: error: unable to connect to remote host at %s:%d\n\n"% (self.hostname,self.port))
             raise
         self._stop = 0
@@ -2013,7 +2177,7 @@ class dbgpSocket:
                 if _is_py3:
                     newData = newData.decode()
                 data = data + newData
-            except socket.error, e:
+            except socket.error as e:
                 # socket was closed on us, quit now
                 log.debug("_getIncomingDataPacket socket closed")
                 self.queue.put(None)
@@ -2054,16 +2218,16 @@ class dbgpSocket:
     def send_response(self, response):
         if self._stop:
             return
-        header = u'<?xml version="1.0" encoding="utf-8"?>\n'
+        header = '<?xml version="1.0" encoding="utf-8"?>\n'
         response = (header+response)
         try:
             response = response.encode('utf-8')
-        except (UnicodeEncodeError,UnicodeDecodeError), e:
+        except (UnicodeEncodeError,UnicodeDecodeError) as e:
             pass
         #log.debug('sending [%r]', response)
         try:
             self._socket.send(_encode_response(response))
-        except socket.error, e:
+        except socket.error as e:
             self.stop()
 
     def notify(self, name, data=None):
@@ -2107,7 +2271,7 @@ class backend(listcmd.ListCmd):
         self._break_status = STATUS_STOPPED
         self._lastErrorMessage = ''
         self._detach = 0
-        self.thread_id = thread.get_ident()
+        self.thread_id = _thread.get_ident()
         if not backend.appid:
             if hasattr(os, 'getpid'):
                 backend.appid = os.getpid()
@@ -2192,7 +2356,7 @@ class backend(listcmd.ListCmd):
         code = code + '\n\n\n'
         
         # let this throw an exception if it fails
-        exec code in locals, locals
+        exec(code, locals, locals)
 
     def runExceptHook(self, type, value, traceback):
         self._isInteractiveShell = 1 # exit when shell is stopped
@@ -2229,7 +2393,7 @@ class backend(listcmd.ListCmd):
         try:
             res = self.dbg.runcall(target, args, kargs)
             self.send_continuationResult(self._continue, STATUS_STOPPING, REASON_OK)
-        except SystemExit, e:  # if someone does a sys.exit(), it's not really an exception.
+        except SystemExit as e:  # if someone does a sys.exit(), it's not really an exception.
             self.send_continuationResult(self._continue, STATUS_STOPPED, REASON_ABORTED)
             raise
         except:
@@ -2259,13 +2423,13 @@ class backend(listcmd.ListCmd):
             self.dbg.runfile(debug_args[0], debug_args)
             if not (self._stop or self._detach):
                 self.send_continuationResult(self._continue, end_status, REASON_OK)
-        except SyntaxError, e: 
+        except SyntaxError as e: 
             _print_exc()
             if not (self._stop or self._detach):
                 self.send_continuationResult(self._continue, end_status, REASON_EXCEPTION)
             self._stop = self._detach = 1
             self.dbg.stoptrace()
-        except SystemExit, e:  # if someone does a sys.exit(), it's not really an exception.
+        except SystemExit as e:  # if someone does a sys.exit(), it's not really an exception.
             if not (self._stop or self._detach):
                 self.send_continuationResult(self._continue, end_status, REASON_ABORTED)
             raise
@@ -2303,7 +2467,7 @@ class backend(listcmd.ListCmd):
     def getHostName(self):
         # if we're running under a webserver, get the webserver hostname
         # otherwise return the hostname normally
-        if os.environ.has_key("HTTP_HOST"):
+        if "HTTP_HOST" in os.environ:
             return os.environ["HTTP_HOST"]
         return socket.gethostname()
 
@@ -2415,7 +2579,7 @@ class backend(listcmd.ListCmd):
             longopt.append(opt[1])
         try:
             opts, args = getopt.getopt(args, short, longopt)
-        except getopt.GetoptError, e:
+        except getopt.GetoptError as e:
             tid = self._getTransactionId(origargs)
             raise CommandError(cmd,tid,ERROR_INVALID_ARGS,'invalid argument supplied: %s' % (str(e)))
         # get the default values
@@ -2465,20 +2629,22 @@ class backend(listcmd.ListCmd):
                 except AttributeError:
                     return self.default(argv)
                 return func(argv[1:])
-        except CommandError, e:
+        except CommandError as e:
             if not e.tid:
                 try:
                     e.tid = self._getTransactionId(argv[1:])
-                except Exception, e:
+                except Exception as e:
                     pass
             if cmd and e.name != cmd:
                 e.name = cmd
             self.socket.send_response(str(e))
             return None
-        except SystemExit, e:
+        except SystemExit as e:
             # we dont want to send anything on an exit, just reraise
             raise
-        except Exception, e:
+        except Exception as e:
+            # When things don't go as expected uncomment this line
+            #log.exception("Problem in cmd:%s", cmd)
             try:
                 tid = self._getTransactionId(argv[1:])
             except:
@@ -2491,7 +2657,7 @@ class backend(listcmd.ListCmd):
     def default(self, argv):
         try:
             tid = self._getTransactionId(argv[1:])
-        except Exception, e:
+        except Exception as e:
             log.exception(e)
             tid = '-1'
         self._continue = RESUME_STOP
@@ -2533,7 +2699,7 @@ class backendCmd(backend):
             codec = codecs.lookup(value)
             self._encoding = value
             return 1
-        except LookupError, e:
+        except LookupError as e:
             return 0
 
     def get_feature_data_encoding(self):
@@ -2555,7 +2721,7 @@ class backendCmd(backend):
         return self.debug_threads
     
     def set_feature_multiple_sessions(self, value):
-        self.debug_threads = long(value)
+        self.debug_threads = int(value)
         set_thread_support(self.debug_threads)
         return 1
 
@@ -2563,32 +2729,32 @@ class backendCmd(backend):
         return self._max_children
 
     def set_feature_max_children(self, value):
-        self._max_children = long(value)
+        self._max_children = int(value)
         return 1
 
     def get_feature_max_data(self):
         return self._max_data
 
     def set_feature_max_data(self, value):
-        self._max_data = long(value)
+        self._max_data = int(value)
         return 1
 
     def get_feature_max_depth(self):
         return self._max_depth
 
     def set_feature_max_depth(self, value):
-        self._max_depth = long(value)
+        self._max_depth = int(value)
         return 1
 
     def get_feature_show_hidden(self):
         return self._show_hidden
 
     def set_feature_show_hidden(self, value):
-        self._show_hidden = long(value)
+        self._show_hidden = int(value)
         return 1
 
     def set_feature_notify_ok(self, value):
-        dbgpSocket.notify_ok = long(value)
+        dbgpSocket.notify_ok = int(value)
         return 1
 
     def get_feature_supports_postmotem(self):
@@ -2598,7 +2764,7 @@ class backendCmd(backend):
         _template = '<response xmlns="urn:debugger_protocol_v1" command="help" transaction_id="%s"><![CDATA[%s]]></response>'
         tid = self._getTransactionId(cmdargs)
         stdout = sys.stdout
-        sys.stdout = StringIO.StringIO()
+        sys.stdout = io.StringIO()
         listcmd.ListCmd.do_help(self, args)
         out = sys.stdout.getvalue()
         self.socket.send_response(_template % (tid, out))
@@ -2766,7 +2932,7 @@ class backendCmd(backend):
                 ret.append( _frame_template % (level, type,
                                                escape(filename),
                                                lineno, escape(where)) )
-        except Exception, e:
+        except Exception as e:
             tb = escape(''.join(traceback.format_list(traceback.extract_tb(sys.exc_info()[2]))))
             raise CommandError('stack_get', tid, ERROR_EXCEPTION,
                                'Unknown exception %s\n%s' % (str(e), tb))
@@ -2808,9 +2974,9 @@ class backendCmd(backend):
 
             ret = []
             if _supports_keyed_sort:
-                names = sorted(items.keys(), key = str.lower)
+                names = sorted(list(items.keys()), key = str.lower)
             else:
-                names = items.keys()
+                names = list(items.keys())
                 def mycmp(i,j): return cmp(i.lower(), j.lower())
                 names.sort(mycmp)
             # Remove __builtins__ everywhere!
@@ -2831,7 +2997,7 @@ class backendCmd(backend):
                                         self._show_hidden, contextTypes)
     
                 ret.append( itemProperty.toxml(0,  self._max_children, self._max_data) )
-        except Exception, e:
+        except Exception as e:
             tb = escape(''.join(traceback.format_list(traceback.extract_tb(sys.exc_info()[2]))))
             raise CommandError('context_get', tid, ERROR_EXCEPTION,
                                'Unknown exception %s\n%s' % (str(e),tb))
@@ -2861,7 +3027,7 @@ class backendCmd(backend):
         try:
             value = eval(expr, bindings)
             typ = _get_object_type_string(value)
-        except Exception, e:
+        except Exception as e:
             #print str(e)
             value = _format_exception_only()
             typ = "Error"
@@ -2964,10 +3130,10 @@ class backendCmd(backend):
                 elif data_type == "unicode":
                     try:
                         data = data.decode('utf-8')
-                    except (UnicodeEncodeError, UnicodeDecodeError), e:
+                    except (UnicodeEncodeError, UnicodeDecodeError) as e:
                         try:
                             data = data.decode()
-                        except (UnicodeEncodeError, UnicodeDecodeError), e:
+                        except (UnicodeEncodeError, UnicodeDecodeError) as e:
                             pass
                 data = repr(data)
                 # now we can eval the string data
@@ -2982,8 +3148,8 @@ class backendCmd(backend):
         # must use the exec statement to get it created correctly, and
         # the fetch it by the variable name.
         try: 
-            if frame.f_locals.has_key(fullname) \
-               or frame.f_globals.has_key(fullname):
+            if fullname in frame.f_locals \
+               or fullname in frame.f_globals:
                 # Eval the rhs first.
                 try:
                     #print 'eval %r in %r, %r' % (data, frame.f_globals, frame.f_locals)
@@ -2993,8 +3159,8 @@ class backendCmd(backend):
                                        ERROR_EVAL_FAILED,
                                        'Invalid variable expression eval\'d for [%s]' % fullname)
                 if context_id == 1 or \
-                    (not frame.f_locals.has_key(fullname) \
-                     and frame.f_globals.has_key(fullname)):
+                    (fullname not in frame.f_locals \
+                     and fullname in frame.f_globals):
                     frame.f_globals[fullname] = value
                 elif self._isInteractiveShell:
                     # we can set into locals if we're in the shell
@@ -3017,7 +3183,7 @@ class backendCmd(backend):
         
                 #print 'exec %s in %s, %s' % (expr, frame.f_globals, frame.f_locals)
                 try:
-                    exec expr in frame.f_globals, frame.f_locals
+                    exec(expr, frame.f_globals, frame.f_locals)
                     #print "frame.f_globals:", frame.f_globals
                     #print "frame.f_locals:", frame.f_locals
                 except:
@@ -3028,7 +3194,7 @@ class backendCmd(backend):
                 if typ == 'Error':
                     raise CommandError('property_set', tid, 
                                        ERROR_INVALID_EXPRESSION, value)
-        except Exception ,e:
+        except Exception as e:
             raise CommandError('property_set', tid,
                                ERROR_INVALID_EXPRESSION,
                                'Invalid variable expression exec\'d [%s]' % e)
@@ -3081,7 +3247,7 @@ class backendCmd(backend):
             bp = self.dbg.set_break(type, filename, lineno, enabled,
                                     temporary, condition, hitValue,
                                     hitCondition)
-        except Exception, e:
+        except Exception as e:
             raise CommandError('breakpoint_set', tid,
                                ERROR_BREAKPOINT_INVALID, str(e))
         
@@ -3143,7 +3309,7 @@ class backendCmd(backend):
             bp.number = bpid
             bpnew.deleteMe()
             bp.insert()
-        except Exception, e:
+        except Exception as e:
             raise CommandError('breakpoint_update', tid,
                                ERROR_BREAKPOINT_INVALID, str(e))
  
@@ -3261,7 +3427,7 @@ class backendCmd(backend):
         frame, lineno = self.dbg.stack[0]
         try:
             value = eval(data, frame.f_globals, frame.f_locals)
-        except Exception, e:
+        except Exception as e:
             raise CommandError('eval', tid, ERROR_EVAL_FAILED,
                            'eval of expression failed: '+str(e))
 
@@ -3294,7 +3460,7 @@ class backendCmd(backend):
             f = open(filepath)
             source = f.readlines()
             f.close()
-        except IOError, e:
+        except IOError as e:
             if filename.startswith("dbgp:"):
                 source = ["Source for exec/eval is unavailable"]
                 
@@ -3419,20 +3585,20 @@ class backendCmd(backend):
         else:
             objectIndex = types.InstanceType
         commonTypes = {
-            types.IntType:      ['int',' xsi:type="xsd:int"'],
-            types.LongType:     ['int',' xsi:type="xsd:long"'],
-            types.FloatType:    ['float',' xsi:type="xsd:float"'],
-            types.StringType:   ['string',' xsi:type="xsd:string"'],
-            types.NoneType:     ['null',''],
-            types.ListType:     ['array',''],
-            types.TupleType:    ['array',''],
-            types.DictType:     ['hash',''],
+            int:      ['int',' xsi:type="xsd:int"'],
+            int:     ['int',' xsi:type="xsd:long"'],
+            float:    ['float',' xsi:type="xsd:float"'],
+            bytes:   ['string',' xsi:type="xsd:string"'],
+            type(None):     ['null',''],
+            list:     ['array',''],
+            tuple:    ['array',''],
+            dict:     ['hash',''],
             objectIndex:        ['object',''],
         }
         if hasattr(types,'BooleanType'):
-            commonTypes[types.BooleanType] = ['bool',' xsi:type="xsd:boolean"']
+            commonTypes[bool] = ['bool',' xsi:type="xsd:boolean"']
         if hasattr(types,'UnicodeType'):
-            commonTypes[types.UnicodeType] = ['string',' xsi:type="xsd:string"']
+            commonTypes[str] = ['string',' xsi:type="xsd:string"']
 
         # a better way to do this?
         # make a list of all the types defined above, then put all the
@@ -3440,7 +3606,7 @@ class backendCmd(backend):
         
         map = []
         usedTypes = []
-        for pyType in commonTypes.keys():
+        for pyType in list(commonTypes.keys()):
             commonTypeName = commonTypes[pyType][0]
             schemaType = commonTypes[pyType][1]
             map.append(_map % (commonTypeName,
@@ -3450,7 +3616,7 @@ class backendCmd(backend):
 
         for pyTypeAttr in dir(types):
             pyType = getattr(types,pyTypeAttr)
-            if type(pyType) == types.TypeType and \
+            if type(pyType) == type and \
                 pyType.__name__ not in usedTypes:
                 map.append(_map % ('resource',pyType.__name__,''))
                 usedTypes.append(pyType.__name__)
@@ -3590,7 +3756,7 @@ class FakeFrame:
             globals["__file__"]= "<console>"
         if not locals:
             locals = globals
-        exec "import site\n\n" in globals, locals
+        exec("import site\n\n", globals, locals)
         del globals['site']
         
         #next outer frame object (this frame's caller)
@@ -3645,7 +3811,7 @@ class InteractiveDebugger(code.InteractiveInterpreter):
             _print_exc()
         else:
             if softspace(sys.stdout, 0):
-                print
+                print()
 
 
 def _dbgp_start_new_thread(function, args=(), kwargs={}):
@@ -3656,11 +3822,11 @@ def _dbgp_start_new_thread(function, args=(), kwargs={}):
     # there is a class with a getName method (ie. trheading.Thread) call that,
     # second, if func_name exists, use that, otherwise repr the function
     _f_dict = dir(function)
-    if 'im_self' in _f_dict and function.im_self and \
-        'getName' in dir(function.im_self):
-        name = function.im_self.getName()
+    if 'im_self' in _f_dict and function.__self__ and \
+        'getName' in dir(function.__self__):
+        name = function.__self__.getName()
     elif 'func_name' in _f_dict:
-        name = function.func_name
+        name = function.__name__
     else:
         name = repr(function)
 
@@ -3676,14 +3842,14 @@ def _thread_start_new_thread(function, args=(), kwargs={}):
     # IDE, then run the thread under the debugger.  We call the original
     # thread.start_new_thread function here, as that is what actually creates
     # the new thread.
-    return thread._thread_start_new_thread(_dbgp_start_new_thread, (function, args), kwargs)
+    return _thread._thread_start_new_thread(_dbgp_start_new_thread, (function, args), kwargs)
 
 def set_thread_support(debug_threads):
     # lib2to3.py doesn't catch instances of imports inside functions
     if sys.version_info[0] >= 3:
         import _thread
     else:
-        import thread as _thread
+        import _thread as _thread
     import threading
     if debug_threads:
         if not hasattr(_thread, '_thread_start_new_thread'):
@@ -3837,7 +4003,7 @@ def runWithoutDebug(debug_args, interactive, host = '127.0.0.1', port = 9000,
         brkOnExcept(host, port, idekey, None, logLevel, module=main)
         #exec code_ob in globals, locals
         h_execfile(debug_args[0], debug_args, module=main)
-    except SystemExit, e:
+    except SystemExit as e:
         # if someone does a sys.exit(), it's not really an exception.
         pass
 
@@ -3850,7 +4016,7 @@ def runWithoutDebug(debug_args, interactive, host = '127.0.0.1', port = 9000,
         # wait until exit
         try:
             client.runInteractive()
-        except SystemExit, e:
+        except SystemExit as e:
             # if someone does a sys.exit(), it's not really an exception.
             pass
         except:
@@ -3884,13 +4050,13 @@ def runWithProfiling(debug_args, host='127.0.0.1', port=9000,
         # We use cPickle for the data format, whilst the Python stdlib stats
         # module uses marshal. This is because the marshal format is insecure
         # and could be maliciously used.
-        from cPickle import dumps
+        from pickle import dumps
         # We must use pickle protocol v2 - as that is highest supported by
         # Python 2 - bug 93345.
         rawprofdata = dumps(prof.stats, protocol=2)
 
     if rawprofdata is not None:
-        print "Program has finished, now sending code profiling data to Komodo..."
+        print("Program has finished, now sending code profiling data to Komodo...")
         if not idekey:
             idekey = getenv('USER', getenv('USERNAME',''))
         _connectionData = {'host':host, 'port':port, 'idekey':idekey,
@@ -3903,5 +4069,5 @@ def runWithProfiling(debug_args, host='127.0.0.1', port=9000,
         # then Komodo will close done the session.
         client.connect(host, port, '__main__', debug_args)
         client.cmdloop()
-        print "Done."
+        print("Done.")
 
