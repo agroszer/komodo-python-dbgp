@@ -1,5 +1,7 @@
 recursive-include dbgp *.py
 recursive-include dbgp *.txt
+recursive-include libs *.so
+recursive-include libs *.pyd
 include bin/*
 include libs/*
 include *.py
