@@ -40,10 +40,22 @@ setup(
     maintainer='Adam Groszer',
     maintainer_email='agroszer@gmail.com',
 
+    classifiers=[
+        "Development Status :: 5 - Production/Stable",
+        "Intended Audience :: Developers",
+        "Programming Language :: Python",
+        "Programming Language :: Python :: 2",
+        "Programming Language :: Python :: 2.4",
+        "Programming Language :: Python :: 2.5",
+        "Programming Language :: Python :: 2.6",
+        "Programming Language :: Python :: 2.7",
+        "Programming Language :: Python :: Implementation :: CPython",
+    ],
+
+
     url='http://github.com/agroszer/komodo-python-dbgp',
     packages=['dbgp'],
     scripts=['bin/pydbgp',
-             'bin/py3_dbgp',
              'bin/pydbgpproxy'],
     zip_safe=False,
 
