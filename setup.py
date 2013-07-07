@@ -15,8 +15,16 @@ class Dbgp_build_ext(build_ext):
     # a fake build_ext, copy our provided pre-built binaries to the right target
 
     def build_extensions(self):
-        scriptdir = os.path.dirname(sys.argv[0])
-        sourcepath = os.path.join(scriptdir, 'libs', self.plat_name)
+        scriptdir = os.path.dirname(os.path.abspath(sys.argv[0]))
+        # weird, for me plat_name is 'linux-i686' on a 32bit linux
+        if 'win32' in self.plat_name:
+            plat = 'win32-x86'
+        elif 'linux' in self.plat_name:
+            if '64' in self.plat_name:
+                plat = 'linux-x86_64'
+            else:
+                plat = 'linux-x86'
+        sourcepath = os.path.join(scriptdir, 'libs', plat)
         if os.path.exists(sourcepath):
             # not all platforms have binaries
             buildpath = os.path.dirname(self.get_ext_fullpath('dbgp._client'))
