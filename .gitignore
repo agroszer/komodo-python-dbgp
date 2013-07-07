@@ -1,2 +1,6 @@
+*.pyc
+__pycache__
+
 komodo_python_dbgp.egg-info
 dist
+build
