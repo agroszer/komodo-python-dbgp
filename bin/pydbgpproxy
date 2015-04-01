@@ -71,6 +71,7 @@ import socket
 import select
 import threading
 import sys
+import logging
 
 
 if sys.version_info[0] <= 2:
@@ -102,10 +103,6 @@ def _get_dbgp_client_pythonlib_path():
 _p = (not hasattr(sys, "frozen") and _get_dbgp_client_pythonlib_path() or None)
 if _p: sys.path.insert(0, _p)
 try:
-    try:
-        import logging
-    except ImportError:
-        from dbgp import _logging as logging
     import dbgp.serverBase
     from dbgp.common import *
 finally:
@@ -503,11 +500,16 @@ def main(argv):
                 idehost = '127.0.0.1'
                 ideport = int(optarg)
         elif opt in ('-l', '--log_level'):
-            if optarg in logging._levelNames:
-                logLevel = logging._levelNames[optarg]
-            else:
-                sys.stderr.write("proxy: error: Invalid log level\n")
-                sys.stderr.write("See 'proxy --help'.\n")
+            level_names = dict([ (logging.getLevelName(lvl), lvl) for lvl in
+                                 range(logging.NOTSET, logging.CRITICAL+1, 10) ])
+            # Add the levels that have multiple names.
+            level_names['WARN'] = logging.WARNING
+            level_names['FATAL'] = logging.FATAL
+            try:
+                logLevel = level_names[optarg]
+            except KeyError:
+                sys.stderr.write("pydbgpproxy: error: Invalid log level\n")
+                sys.stderr.write("See 'pydbgpproxy --help'.\n")
                 return 1
 
     configureLogging(log, logLevel)

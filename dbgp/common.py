@@ -28,10 +28,7 @@
 #    Trent Mick <TrentM@ActiveState.com>
 
 import sys, os
-try:
-    import logging
-except ImportError:
-    from dbgp import _logging as logging
+import logging
 
 # insert a frame flag for ourselves.  This flag is used to drop frames from
 # the stack that we wouldn't want to normally see.  See

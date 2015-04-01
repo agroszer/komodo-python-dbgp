@@ -30,15 +30,11 @@
 import socket, string, sys, os, re
 import threading, select
 import base64
+import logging
 from xml.dom import minidom
 
 import dbgp.listcmd as listcmd
 from dbgp.common import *
-
-try:
-    import logging
-except ImportError:
-    from dbgp import _logging as logging
 
 log = logging.getLogger("dbgp.server")
 #log.setLevel(logging.DEBUG)
@@ -94,7 +90,9 @@ class session:
         self._clientAddr = clientAddr
         # create a new thread and initiate a debugger session
         if not self._cmdthread or not self._cmdthread.isAlive():
-            self._cmdthread = threading.Thread(target = self._cmdloop)
+            self._cmdthread = threading.Thread(target=self._cmdloop,
+                                               name="dbgp server cmdloop")
+            self._cmdthread.setDaemon(True)
             self._cmdthread.start()
         return 1
 
@@ -230,7 +228,9 @@ class listener:
         # if bind raises an exception, dont start
         # the listen thread
         self._bind()
-        self._thread = threading.Thread(target = self._listen)
+        self._thread = threading.Thread(target=self._listen,
+                                        name="dbgp server listener")
+        self._thread.setDaemon(True)
         self._thread.start()
         return (self._address, self._port)
 

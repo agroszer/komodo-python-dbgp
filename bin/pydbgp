@@ -65,18 +65,21 @@ import os
 # Alternate environment variable for specifying dbgp location.  This
 # allows python -E to work even if dbgp is not installed under
 # site-packages
-if os.environ.has_key("PYDBGP_PATH"):
+if "PYDBGP_PATH" in os.environ:
     sys.path.insert(0, os.environ['PYDBGP_PATH'])
 
 import getopt
 import socket
 import types
+import logging
 
 is_v2 = sys.version_info[0] == 2
 if is_v2:
     pythonlib = "pythonlib"
+    UnicodeType = types.UnicodeType
 else:
     pythonlib = "python3lib"
+    UnicodeType = str
 
 def _get_dbgp_client_pythonlib_path():
     """Find the DBGP Python client library in the common install
@@ -102,10 +105,6 @@ try:
     import dbgp.client
     from dbgp.client import log, h_main
     from dbgp.common import *
-    try:
-        import logging
-    except ImportError:
-        from dbgp import _logging as logging
 finally:
     if _p: del sys.path[0]
 
@@ -122,7 +121,7 @@ class IOStream:
         origDBGPHideChildren = DBGPHideChildren
         DBGPHideChildren = DBGPDebugDebugger != DBGP_STOPPABLE_ALWAYS
         try:
-            if self._encodeOnOutput and type(s)==types.UnicodeType:
+            if self._encodeOnOutput and type(s)==UnicodeType:
                 try:
                     s = s.encode(self._encoding)
                 except:
@@ -136,7 +135,7 @@ class IOStream:
         self.write(text)
         
     def __getattr__(self, attr):
-        if self.__dict__.has_key(attr):
+        if attr in self.__dict__:
             return getattr(self,attr)
         return getattr(self._origStream, attr)
 
@@ -151,7 +150,7 @@ def _fixencoding():
         try:
             import codecs
             secret_decoder_ring = codecs.lookup(codeset)
-        except LookupError, e:
+        except LookupError:
             if sys.platform.startswith('win'):
                 codeset = 'mbcs'
             else:
@@ -170,7 +169,8 @@ def main(argv):
             ['help', 'version', 'debug_port',
              'key', 'log_level', 'log_file', 'preload', 'modules',
              'interactive', 'nodebug', 'nostdin'])
-    except getopt.GetoptError, msg:
+    except getopt.GetoptError:
+        msg = sys.exec_info()[0]
         sys.stderr.write("pydbgp: error: %s\n" % str(msg))
         sys.stderr.write("See 'pydbgp --help'.\n")
         return 1
@@ -184,7 +184,7 @@ def main(argv):
                 idekey = idekey.decode(codeset)
             else:
                 idekey = idekey.decode()
-        except (UnicodeDecodeError, LookupError), e:
+        except (UnicodeDecodeError, LookupError):
             log.warn("unable to decode idekey %r"%idekey)
             pass # nothing we can do if defaultlocale is wrong
     host = '127.0.0.1'
@@ -203,7 +203,7 @@ def main(argv):
                     optarg = optarg.decode(codeset)
                 else:
                     optarg = optarg.decode()
-            except (UnicodeDecodeError, LookupError), e:
+            except (UnicodeDecodeError, LookupError):
                 log.warn("unable to decode argument %s = %r"%(opt,optarg))
                 pass # nothing we can do if defaultlocale is wrong
         if opt in ('-h', '--help'):
@@ -228,9 +228,14 @@ def main(argv):
         elif opt in ('-n', '--nodebug'):
             nodebug = 1
         elif opt in ('-l', '--log_level'):
-            if optarg in logging._levelNames:
-                logLevel = logging._levelNames[optarg]
-            else:
+            level_names = dict([ (logging.getLevelName(lvl), lvl) for lvl in
+                                 range(logging.NOTSET, logging.CRITICAL+1, 10) ])
+            # Add the levels that have multiple names.
+            level_names['WARN'] = logging.WARNING
+            level_names['FATAL'] = logging.FATAL
+            try:
+                logLevel = level_names[optarg]
+            except KeyError:
                 sys.stderr.write("pydbgp: error: Invalid log level\n")
                 sys.stderr.write("See 'pydbgp --help'.\n")
                 return 1
@@ -286,7 +291,7 @@ def main(argv):
         client.stdin_enabled = redirect
         try:
             client.connect(host, port, '__main__', args)
-        except socket.error, e:
+        except socket.error:
             return 1
         if interactive and args[0] == 'interactive':
             cprt = 'Type "copyright", "credits" or "license" for more information.'

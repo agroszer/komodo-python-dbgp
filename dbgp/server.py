@@ -40,15 +40,11 @@ import sys
 import socket, string, base64, urllib
 import threading
 import types
+import logging
 from xml.dom import minidom
 import copy
 
-try:
-    import logging
-except ImportError:
-    from dbgp import _logging as logging
 import dbgp.listcmd as listcmd
-
 import dbgp.serverBase
 from dbgp.common import *
 
@@ -531,6 +527,37 @@ class property:
         except UnicodeDecodeError:
             proplog.warn("Unable to decode attr %s, value %r", name, s)
             return s        
+
+    def _ensure_unicode(self, s, context):
+        # Any string that goes through pyxpcom as an AString should be
+        # converted to Unicode. Otherwise pyxpcom will do whatever it feels
+        # like to convert the string.  Sometimes it gets it right, but
+        # other times it treats latin1 as utf-8 (and complains about invalid
+        # bytes, or treats utf-8 as latin1 (and we get doubly-escaped utf8).
+        # Also, it if treats an encoding like a cyrillic one as latin1, the
+        # resulting characters won't be recognizable.
+        #
+        # Doing this fixes this problem.
+        if isinstance(s, str):
+            try:
+                return s.decode("utf-8")
+            except UnicodeDecodeError:
+                try:
+                    return s.decode('latin1')
+                except:
+                    proplog.exception("property.%s: Failed to convert %r", value, context)
+        return s
+
+    # These methods are XPCOM getters.  Use methods to allow converting
+    # them into Unicode strings as they're AString values in the IDL.
+    def get_value(self):
+        return self._ensure_unicode(self.value, "value")
+
+    def get_name(self):
+        return self._ensure_unicode(self.name, "name")
+
+    def get_fullname(self):
+        return self._ensure_unicode(self.fullname, "fullname")
          
     def initWithNode(self, session, node, context = 0, depth = 0):
         self.session = session
@@ -831,7 +858,10 @@ class session(dbgp.serverBase.session):
             # the cmdloop thread, because it would cause a deadlock.
             # this is a short lived thread, so should be fine
             log.debug('starting init thread')
-            threading.Thread(target = self.initFeatures, args=(root,)).start()
+            t = threading.Thread(target=self.initFeatures, args=(root,),
+                                 name="dbgp initFeatures")
+            t.setDaemon(True)
+            t.start()
     
     def initFeatures(self, initNode):
         # get our init information
@@ -1804,7 +1834,10 @@ class application:
         ok = self.currentSession.setStdinHandler(file)
         if ok:
             self._stdin = file
-            threading.Thread(target = self._stdinHandlerThread).start()
+            t = threading.Thread(target=self._stdinHandlerThread,
+                                 name="dbgp stdinHandler")
+            t.setDaemon(True)
+            t.start()
         return ok
 
     def _stdinHandlerThread(self):
@@ -2041,12 +2074,12 @@ class breakpointManager:
                 for guid in sessionBPIDs.keys():
                     try:
                         session = self._sessions[sessId]
-                    except (KeyError, ItemError), ex:
+                    except KeyError, ex:
                         log.exception("Failed to find session %r", sessId)
                         continue
                     try:
                         bp = self._breakpoints[guid]
-                    except (KeyError, ItemError), ex:
+                    except KeyError, ex:
                         log.exception("Failed to find breakpoint %r in session %r", guid, sessId)
                         continue
                     self._removeSessionBreakpointOrQueueIt(session, bp)

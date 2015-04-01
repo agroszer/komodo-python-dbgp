@@ -44,16 +44,13 @@ import tokenize
 import getopt, os, types, StringIO, Queue
 import traceback, re
 import base64, urlparse
-import dbgp.listcmd as listcmd
+import logging
 
+import dbgp.listcmd as listcmd
 from dbgp.common import *
 import dbgp.common
-dbgp.common.__builtins__['DBGPHideChildren'] = 0
 
-try:
-    import logging
-except ImportError:
-    from dbgp import _logging as logging
+dbgp.common.__builtins__['DBGPHideChildren'] = 0
 
 log = logging.getLogger("dbgp.client")
 
@@ -167,6 +164,16 @@ def url2pathname( url ):
     decomposedURL = urlparse.urlparse( url, 'file:///' )
 
     path = decomposedURL[2]
+
+    # File paths don't have extra data, so reconstruct the path for these
+    # special cases - bug 105601.
+    if decomposedURL.params:
+        path += ";" + decomposedURL.params
+    if decomposedURL.query:
+        path += "?" + decomposedURL.query
+    if decomposedURL.fragment:
+        path += "#" + decomposedURL.fragment
+        
     # The path will begin with a superfluous '/' in this case
 
     if ( url.strip().lower()[0:8] == 'file:///' and isWindows):
@@ -658,7 +665,7 @@ class h_execfile(h_base):
             if _is_py3:
                 globals['__file__'] = file
                 encoding = self._get_file_encoding(file)
-                fd = open(file)
+                fd = open(file, encoding=encoding)
                 try:
                     contents = fd.read()
                 finally:
@@ -1184,7 +1191,17 @@ def canonic(fname):
     if canonic:
         return canonic
     if fname.startswith("<") and fname.endswith(">"):
-        canonicCache[fname] = fname
+        if fname != "<string>":
+            # bug 98951:
+            # There are no breakpoints in '<string>'
+            # Don't add a buffer called '<string>' to the canonical buf list
+            # or it will confuse the C module.
+            # In Python3 exec'ed modules have a default co_filename of
+            # "<string>", but we don't ever break on exec'ed buffers,
+            # so there's no need to store it.  And due to an interaction
+            # with issue bugs.python.org/issue17971, we sometimes get buffers
+            # called "<string>" that hide the actual breakpoint.
+            canonicCache[fname] = fname
         return fname
     
     canonic = os.path.abspath(fname)
@@ -1397,7 +1414,7 @@ class StandardProperty:
         return "&#x%0x;" % ord(m.group(1))
 
     _should_be_base64_encoded__ctrl_char_re = re.compile(r'[\x00-\x08\x0b\x0c\x0d\-x0e\x10-\x1f]')
-    _should_be_base64_encoded__high_bit_re = re.compile(r'[^\x00-\xff]')
+    _should_be_base64_encoded__high_bit_re = re.compile(r'[^\x00-\x7f]')
     def _should_be_base64_encoded(self, data):
         if _is_py3 and type(data) == types.StringType: # types.StringType 2=>3 bytes
             data = data.decode('utf-8')
@@ -1975,7 +1992,7 @@ class dbgpClient(clientBase):
         rc = self.interaction(frame)
         if rc == RESUME_STOP:
             self.set_quit()
-            sys.exit(-1)
+            sys.exit(0)
         elif rc == RESUME_STEP_IN:
             self.set_step()
         elif rc == RESUME_STEP_OVER:
@@ -2758,7 +2775,7 @@ class backendCmd(backend):
         dbgpSocket.notify_ok = long(value)
         return 1
 
-    def get_feature_supports_postmotem(self):
+    def get_feature_supports_postmortem(self):
         return 1
 
     def do_help(self, cmdargs, *args):
