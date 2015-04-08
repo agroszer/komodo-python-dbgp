@@ -40,7 +40,7 @@ class Dbgp_build_ext(build_ext):
 
 setup(
     name=NAME,
-    version='9.0.0',
+    version='9.0.1.dev0',
     description='The ActiveState Komodo DBGP server',
 
     author="Shane Caraveo, Trent Mick",
