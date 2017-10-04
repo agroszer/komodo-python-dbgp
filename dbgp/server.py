@@ -819,7 +819,7 @@ class session(dbgp.serverBase.session):
                     self._stop = 1
                     
             if command in ['run', 'step_into', 'step_over',
-                           'step_out', 'stop', 'detach', 'interact']:
+                           'step_out', 'stop', 'detach', 'interact', 'break']:
                 
                 # any response command can initiate an interactive prompt
                 # if it includes the prompt and more attributes
@@ -1097,11 +1097,11 @@ class session(dbgp.serverBase.session):
         self._resp_cv.notify()
         self._resp_cv.release()
 
-    def sendCommandWait(self, argv, data = None):
+    def sendCommandWait(self, argv, data = None, timeout = 5):
         if self._stop:
             raise DBGPError('command sent after session stopped')
         tid = self.sendCommand(argv, data)
-        node = self._waitResponse(tid)
+        node = self._waitResponse(tid, timeout)
         err = node.getElementsByTagName('error')
         if err:
             errcode = err[0].getAttribute('code')
@@ -1260,7 +1260,7 @@ class session(dbgp.serverBase.session):
         if command is None:
             tid = self.sendCommand(['interact', '-m', '0'])
         else:
-            tid = self.sendCommand(['interact', '-m', '1'], command)
+            tid = self.sendCommand(['interact', '-m', '1'], command.encode('utf-8'))
         
         return tid
 
@@ -1314,7 +1314,9 @@ class session(dbgp.serverBase.session):
     #                out PRUint32 count);
     def contextGet(self, contextId, depth):
         self._noAsync('context_get')
-        node = self.sendCommandWait(['context_get', '-c', str(contextId), '-d', str(depth)])
+        # Need a long timeout since at least Google Chrome takes a while to send
+        # back global variables.
+        node = self.sendCommandWait(['context_get', '-c', str(contextId), '-d', str(depth)], timeout=30)
         propertyList = []
         for child in node.childNodes:
             if child.nodeType == minidom.Node.ELEMENT_NODE and \

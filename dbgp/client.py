@@ -118,8 +118,7 @@ else:
     _supports_keyed_sort = sys.version_info[1] >= 4
     def _encode_response(response):
         # response is already utf-8-encoded
-        packet = '%d\0%s\0' % (len(response), response)
-        return packet.encode()
+        return '%d\0%s\0' % (len(response), response)
 
 if hasattr('', '__add__'):
     HiddenTypes.append(type(''.__add__))
@@ -1365,7 +1364,11 @@ else:
     def base64_encodestring(data):
         return base64.encodestring(data)
     def base64_decodestring(data):
-        return base64.decodestring(data)
+        data = base64.decodestring(data)
+        try:
+            return data.decode('utf-8') # prefer UTF-8
+        except:
+            return data
 
 def Property(name, fullname, value, encoding='base64',
              include_private=0, include_hiddenTypes=None):
